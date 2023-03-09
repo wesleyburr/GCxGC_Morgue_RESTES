@@ -1,4 +1,5 @@
-# GCxGC_Morgue_RESTES
+# GCxGC Morgue and RESTES VOCs  [![DOI](https://zenodo.org/badge/611850743.svg)](https://zenodo.org/badge/latestdoi/611850743)
+
 
 Code for analysis of GCxGC data from Morgue+RESTES decomposition study. Darshil Patil, PhD candidate at UQTR, under Dr. Shari Forbes, ran a number of experiments gathering headspace observations from decomposition of human remains, for the question of "VOC Profile of the post-mortem period". 
 
