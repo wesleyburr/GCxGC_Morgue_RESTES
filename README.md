@@ -20,4 +20,4 @@ There are 11 main files, all R Markdown documents, which perform varying steps i
 * 10: filter, again, following 9
 * 11: merge, again, following 10
 
-All scripts were executed on a server running an AMD Threadripper 2950X (16 cores, 32 threads) with 256GB of RAM, and Ubuntu Linux 20.04. 
+All scripts were executed on a server running an AMD Threadripper 2950X (16 cores, 32 threads) with 256GB of RAM, and Ubuntu Linux 20.04. **Note**: if you wish to reproduce these results, expect the alignment process to take 4-6 days assuming you have the same compute power available to you that was used in the original iteration. This is not suitable for executing on a standard laptop or desktop system!
