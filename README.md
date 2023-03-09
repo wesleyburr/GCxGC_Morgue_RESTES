@@ -6,18 +6,18 @@ This code is a set of routines which work with the exported "hit list" from the 
 
 There are 11 main files, all R Markdown documents, which perform varying steps in the pipeline.
 
-0: load the Excel sheets from LECO; process and run an alignment procedure, first across the reference controls, and then across the observations
-1: clean up the results from 1, organize in preparation for coincidence detection
-2: load the .rda objects, and normalize with respect to Bromobenze, the reference standard
-3: select, filter, clean and merge compounds using logic as described in the thesis
-4: filter out extraneous results
-5: merge, reorganize
-6: check the alignment of bromobenzene, as suggested by one thesis reviewer
-6: compare the aligned RTs
-7: identify common compounds
-8: normalize the alignment again
-9: clean-up, again
-10: filter, again
-11: merge, again
+* 0: load the Excel sheets from LECO; process and run an alignment procedure, first across the reference controls, and then across the observations
+* 1: clean up the results from 1, organize in preparation for coincidence detection
+* 2: load the .rda objects, and normalize with respect to Bromobenze, the reference standard
+* 3: select, filter, clean and merge compounds using logic as described in the thesis
+* 4: filter out extraneous results
+* 5: merge, reorganize
+* 6: check the alignment of bromobenzene, as suggested by one thesis reviewer
+* 6: compare the aligned RTs
+* 7: identify common compounds
+* 8: normalize the alignment again
+* 9: clean-up, with normalization, alignment and RT filtering done first
+* 10: filter, again, following 9
+* 11: merge, again, following 10
 
 All scripts were executed on a server running an AMD Threadripper 2950X (16 cores, 32 threads) with 256GB of RAM, and Ubuntu Linux 20.04. 
