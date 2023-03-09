@@ -1,0 +1,100 @@
+---
+title: "Extract Files"
+author: "Wesley Burr"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Working from the Aligned Data instead of Excel Files
+
+Libraries first:
+
+```{r libraries, error = FALSE, message = FALSE, warning = FALSE}
+library("readxl")
+library("stringr")
+library("tidyverse")
+```
+
+and then we load the aligned data:
+
+```{r}
+load("controls_aligned.rda")
+load("samples_aligned_100_50_mc28.rda")
+```
+
+## Extract and Save Out the Aligned Files for Morgue
+
+Previously, we were loading one Excel file at a time, with its specific
+sheets all loaded into a list. These were called M_DONOR_1 through 
+M_DONOR_9, and were the morgue files only. We can replicate this:
+they are the objects in the control/sample list that are labeled as MR. They
+will have H1 through H9 to refer to the 1 to 9. 
+
+Unfortunately the names aren't accurate in the spreadsheets, so we have to
+just do this sequentially. H1 is ok (entries 1:3), H2 is ok (4:6), but
+H3 isn't (7:9). The first 24 entries are the records, though - 8*3 = 24, 
+and this is samples 1:4, 6:9. 
+
+```{r}
+names_obj <- c(1:4, 6:9)
+names_obj <- paste("M_DONOR_", names_obj, collapse = NULL, sep = "")
+
+for(j in 1:8) {
+  dat <- do.call("rbind", samples_aligned[seq((j-1)*3+1, j*3, 1)])
+  dat <- rbind(dat, controls_aligned[[j]]) # add the controls in
+  names(dat) <- c("PeakNum", "Sample", "Name", "Formula", "RTs", "RT1", 
+                  "RT2", "Similarity",
+                  "Area", "Height", "QuantMass", "BaseMass", "QuantSN", "PeakSN",
+                  "Type", "Conc", "ConcUnits", "Aligned")
+ 
+  assign(x = names_obj[j], dat)
+  save(file = paste0("./dat/", names_obj[j], ".rda"), list = names_obj[j])
+}
+```
+
+## Extract and Save Out the Aligned Files for REST
+
+Previously, we were loading one Excel file at a time, with its specific
+sheets all loaded into a list. These were the files RH1 through RH9, 8
+in total.
+
+```{r}
+names_obj <- c(1:9)
+names_obj <- paste("RH", names_obj, collapse = NULL, sep = "")
+
+controls_ss <- substr(names(controls_aligned), 1, 2)
+samples_ss <- substr(names(samples_aligned), 1, 2)
+
+# the j=1 case, H1, is special because it only has one control and one triplicate;
+# not the repeats of the others
+dat <- do.call("rbind", samples_aligned[which(samples_ss == paste0("H", 1))])
+dat <- rbind(dat, controls_aligned[[which(controls_ss == paste0("H", 1))]]) 
+                  # only one control; need to [[*]] extract
+names(dat) <- c("PeakNum", "Sample", "Name", "Formula", "RTs", "RT1", 
+                "RT2", "Similarity",
+                "Area", "Height", "QuantMass", "BaseMass", "QuantSN", "PeakSN",
+                "Aligned")
+ 
+assign(x = names_obj[1], dat)
+save(file = paste0("./dat/", names_obj[1], ".rda"), list = names_obj[1])
+
+# the cases of the others are easier; just have to twiddle with 6:9
+for(j in c(2:9)[-4]) {
+  dat1 <- do.call("rbind", samples_aligned[which(samples_ss == paste0("H", j))])
+  dat2 <- do.call("rbind", controls_aligned[which(controls_ss == paste0("H", j))]) 
+  dat <- rbind(dat1, dat2)
+  names(dat) <- c("PeakNum", "Sample", "Name", "Formula", "RTs", "RT1", 
+                  "RT2", "Similarity",
+                  "Area", "Height", "QuantMass", "BaseMass", "QuantSN", "PeakSN",
+                  "Aligned")
+ 
+  assign(x = names_obj[j], dat)
+  save(file = paste0("./dat/", names_obj[j], ".rda"), list = names_obj[j])
+}
+
+```

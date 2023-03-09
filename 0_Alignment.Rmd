@@ -1,0 +1,388 @@
+---
+title: "Re-Analyze"
+author: "Wesley Burr"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Some Useful Libraries
+
+```{r echo = FALSE, message = FALSE, warning = FALSE, error = FALSE}
+library(tidyverse)
+library(readxl)
+library(parallel)
+```
+
+## Adding in an Alignment Step
+
+We did not align the spectra across samples previously, instead counting
+on the coincidences and comparison done in the processing to take care of this.
+The reviewers on Darshil's thesis want to see this done, so here, we will
+implement a clone of the LECO software process (of sorts), and search
+for misaligned / misidentified peaks, and identify them based on references.
+
+In the following function the input
+**samples** is a list of data.frames, each of which is a non-filtered
+peak list from LECO's ChromaTOFv5, extracted using a minimum S/N ratio of 1
+and after running the NIST library search. We will apply
+this function to the set of samples as determined by Darshil and Shari.
+
+```{r deprecated}
+align_samples <- function(samples, 
+                          RT1_d = 15.0, 
+                          RT2_d = 0.2, 
+                          mass_d = 0.01,
+                          SN1 = 50,
+                          SN2 = 10) {
+  stopifnot(is.list(samples))
+  stopifnot(length(samples) > 1)
+  
+  # iterate on known peaks, by unique reference: get a list
+  known_peaks <- unique(unlist(lapply(samples, FUN = function(x) { 
+    unique(x$Name) })))
+  
+  # get rid of all of the 'Peak X' which were **not** detected in that 
+  # experimental sample; we'll deal with these separately, if at all
+  known_peaks <- known_peaks[!substr(known_peaks, 1, 4) == "Peak"]
+  
+  cat("Alignment Process Begun:", length(known_peaks), "unique compounds. \n\n")
+ 
+  # iterate through the samples, treating each as the 'primary' 
+  for(j in 1:length(samples)) {
+    cat("Sample ", j, " (", names(samples)[j], ")\n", sep = "")
+    # Now iterate through the known compounds: find each one in 
+    # this sample, if it exists; then scan for it across the _other_
+    # samples 
+    dat <- samples[[j]]
+    for(compound in known_peaks) {
+      #
+      #  Original logic is: if it's a peak, and it has a S/N above the cutoff,
+      #  then we scan for it. Detected or not doesn't really matter. We will
+      #  (in this function) only concern ourselves with peaks that *were*
+      #  detected by the NIST scan.
+      #
+      if(compound %in% dat$Name) {
+        # cat("Compound", compound, "detected in sample", j, " - scanning ...\n")
+        filter_compound <- dat %>% filter(Name == compound, PeakSN > SN1)
+        if(nrow(filter_compound) > 0) { 
+          
+          for(l in 1:nrow(filter_compound)) {
+            ref_primary <- filter_compound[l, ] 
+            # loop across the other samples
+            for(m in (1:length(samples))[-j]) {
+              dat2 <- samples[[m]]
+              found <- dat2 %>% filter(RT1 > ref_primary$RT1 - RT1_d, 
+                                       RT1 < ref_primary$RT1 + RT1_d,
+                                       RT2 > ref_primary$RT2 - RT2_d,
+                                       RT2 < ref_primary$RT2 + RT2_d,
+                                       Mass > ref_primary$Mass - 0.01,
+                                       Mass < ref_primary$Mass + 0.01,
+                                       PeakSN > SN2)
+              if(nrow(found) > 0) {
+                # see if correction is needed
+                for(n in 1:nrow(found)) {
+                  # check each match; if the name DOESN'T match and was previously undetected, 
+                  # we maybe found an alignment; correct it, flag it, move on
+                  tmp <- dat2 %>% filter(Peak == found$Peak[n])
+                  if(tmp$Name != compound & substr(tmp$Name, 1, 4) == "Peak") {
+                    dat2[dat2$Peak == found$Peak[n], c("Name", "Formula", "Aligned")] <- 
+                      c(ref_primary$Name, ref_primary$Formula, 1)
+                  }
+                }
+              }
+              samples[[m]] <- dat2  # write back
+            } # m loop - across samples
+          } # l loop - across repeated detects of a given compound in primary
+        } # looking for S/N if statement 
+      } # if statement - if not detected in primary, move on
+    } # compound loop, across unique compounds
+  } # j loop - samples as primary
+  return(samples) 
+} # EOFunc
+```
+
+```{r alignment}
+align_samples2 <- function(samples, 
+                           RT1_d = 15.0, 
+                           RT2_d = 0.2, 
+                           mass_d = 0.01,
+                           SN1 = 50,
+                           SN2 = 10,
+                           n.cores = 4) {
+  stopifnot(is.list(samples))
+  stopifnot(length(samples) > 1)
+  
+  # iterate on known peaks, by unique reference: get a list
+  known_peaks <- unique(unlist(lapply(samples, FUN = function(x) { 
+    unique(x$Name) })))
+  
+  # get rid of all of the 'Peak X' which were **not** detected in that 
+  # experimental sample; we'll deal with these separately, if at all
+  known_peaks <- known_peaks[!substr(known_peaks, 1, 4) == "Peak"]
+  
+  cat("Alignment Process Begun:", length(known_peaks), "unique compounds. \n\n")
+ 
+  # iterate through the samples, treating each as the 'primary' 
+  for(j in 1:length(samples)) {
+    date_time <- date()
+    cat("Sample ", j, " (", names(samples)[j], ")", date_time, "\n", sep = "")
+    dat <- samples[[j]]
+    for(compound in known_peaks) {
+      if(compound %in% dat$Name) {
+        filter_compound <- dat %>% filter(Name == compound, PeakSN > SN1)
+        if(nrow(filter_compound) > 0) { 
+          for(l in 1:nrow(filter_compound)) {
+            ref_primary <- filter_compound[l, ] 
+            # lapply across the other samples in the set
+            samples[-j] <- mclapply(samples[-j], FUN = function(x) { 
+                                   found <- x %>% filter(RT1 > ref_primary$RT1 - RT1_d, 
+                                                         RT1 < ref_primary$RT1 + RT1_d,
+                                                         RT2 > ref_primary$RT2 - RT2_d,
+                                                         RT2 < ref_primary$RT2 + RT2_d,
+                                                         Mass > ref_primary$Mass - mass_d,
+                                                         Mass < ref_primary$Mass + mass_d,
+                                                         PeakSN > SN2)
+              if(nrow(found) > 0) {
+                for(n in 1:nrow(found)) {
+                  # check each match; if the name DOESN'T match and was previously undetected, 
+                  # we maybe found an alignment; correct it, flag it, move on
+                  tmp <- x %>% filter(Peak == found$Peak[n])
+                  if(tmp$Name != compound & substr(tmp$Name, 1, 4) == "Peak") {
+                    x[x$Peak == found$Peak[n], c("Name", "Formula", "Aligned")] <- 
+                      c(ref_primary$Name, ref_primary$Formula, 1)
+                  }
+                }
+              }
+              x
+            }, mc.cores = n.cores)
+            
+          } # l loop - across repeated detects of a given compound in primary
+        } # looking for S/N if statement 
+      } # if statement - if not detected in primary, move on
+    } # compound loop, across unique compounds
+  } # j loop - samples as primary
+  return(samples) 
+} # EOFunc
+```
+
+
+In the ChromaTOF software, the following is the process that would normally
+be undertaken. Anything noted as (done) was done by the analysts before 
+we obtained this data.
+
+1. Baseline calculation (done)
+2. First peak finding pass (done) - S/N of 1
+3. Peak alignment (using similarity, mass, RT - not done!)
+4. Determination of reference peaks (also not done; all peaks assumed to be references)
+5. Second peak finding pass (allowing lower S/N - irrelevant to us)
+6. Determination of quant mass
+7. Peak integration
+8. Retaining peaks of interest
+9. Library searching of found peaks (done, but only individually - won't be necessary
+a second time because it was already done, unless a completely unidentified peak
+is observed across samples and matched)
+
+## Load All of the Data
+
+The data is stored by donor, then disaggregated by sheet to indicate
+control samples versus experimental (replicate) samples. For example,
+Donor 1 in the Morgue is M_DONOR_1.xlsx. This excel spreadsheet has
+four sheets in it:
+
+```{r}
+excel_sheets("./dat/M_DONOR_1.xlsx")
+```
+
+These are all MR_20, with "CH1", "H1_1", "H1_2" and "H1_3" as labels.
+That stands for Morgue, 2020, Control H1 and H1_1-H1_3 as the three replicate
+observations. This isn't super consistent across the sheets, e.g.,
+
+```{r}
+excel_sheets("./dat/M_DONOR_9.xlsx")
+```
+Note that it goes from MR_ to M_, but is otherwise fine. All 8 of the 
+morgue files use "CH" in their control files. All 8 of the REST facility
+files use "RC" instead, e.g., H4D3RC. We will use this to filter the controls
+into their own set for alignment. This can easily be changed later.
+
+```{r}
+controls <- list(data.frame(test = 0))
+samples <- list(data.frame(test = 0))
+c_idx <- s_idx <- 1
+
+# Morgue Data
+for(j in c(1:4, 6:9)) {
+  sheets <- excel_sheets(paste0("./dat/M_DONOR_", j, ".xlsx"))
+  for(m in sheets) {
+     tmp <- read_excel(path = paste0("./dat/M_DONOR_", j, ".xlsx"),
+                        sheet = m)
+     if(grepl("CH", m)) {
+       controls[[c_idx]] <- tmp
+       names(controls)[c_idx] <- m
+       c_idx <- c_idx + 1
+     } else {
+       samples[[s_idx]] <- tmp
+       names(samples)[s_idx] <- m
+       s_idx <- s_idx + 1
+    }
+  }
+}
+
+# REST Data
+for(j in c(1:4, 6:9)) {
+  sheets <- excel_sheets(paste0("./dat/RH", j, ".xlsx"))
+  for(m in sheets) {
+     tmp <- read_excel(path = paste0("./dat/RH", j, ".xlsx"),
+                        sheet = m)
+     # the REST data isn't formatted the same
+     tmp <- tmp[, -1]  # drop 1st column which is a dupe
+     RTs <- unlist(tmp[, 5])
+     RT1 <- unlist(lapply(strsplit(RTs, ","), FUN = function(x) { x[1] }))
+     RT2 <- unlist(lapply(strsplit(RTs, ","), FUN = function(x) { x[2] }))
+     tmp <- data.frame(tmp[, 1:5], RT1, RT2, tmp[, 6:12])
+     if(grepl("RC", m)) {
+       controls[[c_idx]] <- tmp
+       names(controls)[c_idx] <- m
+       c_idx <- c_idx + 1
+     } else {
+       samples[[s_idx]] <- tmp
+       names(samples)[s_idx] <- m
+       s_idx <- s_idx + 1
+    }
+  }
+}
+```
+
+
+```{r}
+# Fix RT names
+samples <- lapply(samples, FUN = function(x) { 
+  x <- data.frame(x, Aligned = 0)
+  names(x)[c(1, 6:7, 12, 14)] <- c("Peak", "RT1", "RT2", "Mass", "PeakSN")
+  x })
+
+controls <- lapply(controls, FUN = function(x) { 
+  x <- data.frame(x, Aligned = 0)
+  names(x)[c(1, 6:7, 12, 14)] <- c("Peak", "RT1", "RT2", "Mass", "PeakSN")
+  x })
+```
+
+Some of the RT extractions aren't mapping to numeric, and they need to be.
+Same with Mass and PeakSN. Some of this will involve coercions, so warnings
+are turned off.
+
+```{r warning=FALSE, message=FALSE}
+controls <- lapply(controls, FUN = function(x) { 
+  x$RT1 <- as.numeric(x$RT1)
+  x$RT2 <- as.numeric(x$RT2)
+  x$Mass <- as.numeric(x$Mass)
+  x$PeakSN <- as.numeric(x$PeakSN)
+  x
+})
+
+samples <- lapply(samples, FUN = function(x) { 
+  x$RT1 <- as.numeric(x$RT1)
+  x$RT2 <- as.numeric(x$RT2)
+  x$Mass <- as.numeric(x$Mass)
+  x$PeakSN <- as.numeric(x$PeakSN)
+  x
+})
+```
+
+```{r}
+controls <- lapply(controls, FUN = function(x) { x %>% filter(x$RT1 < 2500) })
+save(file = "controls_unaligned.rda", controls)
+samples <- lapply(samples, FUN = function(x) { x %>% filter(x$RT1 < 2500) })
+save(file = "samples_unaligned.rda", samples)
+```
+
+### Controls: Aligned
+
+We'll start with the controls because there's much less of them
+(`r length(controls)` instead of `r length(samples)`). It'll still 
+take **some** time.
+
+```{r}
+system.time(controls_aligned <- align_samples2(controls, 
+                                               RT1_d = 10,
+                                               RT2_d = 0.06, 
+                                               mass_d = 0.001,
+                                               SN1 = 50,
+                                               SN2 = 10,
+                                               n.cores = 28))
+save(file = "controls_aligned.rda", controls_aligned)
+```
+
+Sample 1 (MR_20CH1)Sun Nov 20 00:54:05 2022
+Sample 43 (H9D5RC)Sun Nov 20 17:31:38 2022 + some
+
+    user    system   elapsed 
+187212.09 254485.80  61922.61 
+(17 hours)
+
+Now, do the samples:
+
+```{r}
+system.time(samples_aligned <- align_samples2(samples, 
+                                              RT1_d = 10,
+                                              RT2_d = 0.06, 
+                                              mass_d = 0.001,
+                                              SN1 = 100,
+                                              SN2 = 50,
+                                              n.cores = 28))
+
+save(file = "samples_aligned_100_50_mc28.rda", samples_aligned)
+```
+Notes: this took quite a while. Started
+Sample 1 (MR_20H1_1)Tue Nov 15 16:14:03 2022
+and ended about half an hour after
+Sample 125 (H9D5R1)Sat Nov 19 15:17:43 2022
+Total: 
+1675646.6 1318013.4  345395.5 
+
+(96 hours)
+
+## Analysis of Alignment
+
+So what did this incredible amount of compute power accomplish, exactly?
+Let's examine the controls first:
+
+```{r}
+updated <- vector(length = length(controls))
+nrecord <- vector(length = length(controls))
+for(j in 1:length(controls)) {
+  nrecord[j] <- nrow(controls[[j]])
+  updated[j] <- length(which(controls_aligned[[j]]$Aligned == "1"))
+}
+plot(x = 1:length(controls),
+     y = round(updated/nrecord * 1000) / 10,
+     xlab = "Control Record",
+     ylab = "Percent Updated",
+     main = "Controls: Alignment Percentage",
+     type = "h")
+```
+
+```{r}
+updated <- vector(length = length(samples))
+nrecord <- vector(length = length(samples))
+for(j in 1:length(samples)) {
+  nrecord[j] <- nrow(samples[[j]])
+  updated[j] <- length(which(samples_aligned[[j]]$Aligned == "1"))
+}
+plot(x = 1:length(samples),
+     y = round(updated/nrecord * 1000) / 10,
+     xlab = "Sample Record",
+     ylab = "Percent Updated",
+     main = "Samples: Alignment Percentage",
+     type = "h")
+```
+
+So on average, 15% of each of the samples was updated with this alignment procedure:
+a large number of previously undetected compounds have now been detected. 
+We'll need a custom version of 1_Load_Review to deal with the structure of this
+data, since we already took care of the RTs, and they're not Excel files anymore.
+But we can set it up to do the normalization and process from there.

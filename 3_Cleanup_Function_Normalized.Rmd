@@ -1,0 +1,548 @@
+---
+title: "General Function Cleaning (Normalized)"
+author: "Wesley Burr"
+date: "2022-11-20"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(stringr)
+```
+
+## Cleanup, with Normalization Done First: Morgue
+
+In this file, we use the
+Bromobenzene-normalized inputs and then clean.
+
+```{r function}
+##
+#  clean_common: Function to select, filter, clean, filter and merge 
+#  compounds using the logic of:
+#  * unique to the samples, not the control, for ALL samples; or
+#  * in both samples and control, but much stronger in the control
+# 
+#  Inputs:
+#  * dat: data.frame sourced from merging spreadsheets of GCxGC output
+#  * sample_names: names of specific samples (e.g., SS5_Foot_1_a)
+#  * control_names: names of specific control samples (e.g., SS5_Foot_1_Control_a)
+#  * ratio_par: cut-off for the logic of "in both samples and control" - if this
+#      is set very large, will eliminate cross-overs.
+#
+#  Returns:
+#  * samples_keep: list of full data.frames for individual replicates, cleaned
+#      down to relevant compounds using above logic
+##
+clean_common <- function(dat,
+                         sample_names,
+                         control_names,
+                         ratio_par = 2.0) {
+  
+  samples <- vector("list", length = length(sample_names))
+  names(samples) <- sample_names
+  controls <- vector("list", length = length(control_names))
+  names(controls) <- control_names
+  
+  # Extract specific samples and controls of interest and
+  # dump all but the largest Area example of each compound
+  for(j in 1:length(sample_names)) {
+    samples[[j]] <- dat %>% subset(Sample == sample_names[j]) %>%
+                      group_by(Name) %>%
+                      filter(Area == max(Area)) %>%
+                      ungroup() %>% filter(substr(Name, 1, 4) != "Peak")
+    samples[[j]] <- samples[[j]][!duplicated(samples[[j]]$Name), ]
+  } 
+  for(j in 1:length(control_names)) {
+    controls[[j]] <- dat %>% subset(Sample == control_names[j]) %>%
+                      group_by(Name) %>%
+                      filter(Area == max(Area)) %>%
+                      ungroup() %>% filter(substr(Name, 1, 4) != "Peak")
+    controls[[j]] <- controls[[j]][!duplicated(controls[[j]]$Name), ]
+  } 
+  # merge controls
+  control <- do.call("rbind", controls)
+  control <- control %>% group_by(Name) %>%
+                      filter(Area == max(Area)) %>%
+                      ungroup() 
+  control <- control[!duplicated(control$Name), ]
+
+  # Find compounds that are in each sample that are also in control
+  # but are much more 'significant' in the sample
+  #
+  # and also compounds that are not in the controls at all
+  samples_keep <- samples
+  for(j in 1:length(sample_names)) {
+    samp <- samples[[j]] %>% filter(samples[[j]]$Name %in% control$Name)
+    cont <- control %>% filter(control$Name %in% samples[[j]]$Name)
+   
+    # ratio is high enough to keep 
+    samp_SN <- unlist(samp[order(samp$Name), "PeakSN"])
+    cont_SN <- unlist(cont[order(cont$Name), "PeakSN"])
+    contrib1 <- samp %>% filter((samp_SN / cont_SN) > ratio_par)
+   
+    # also, compounds that are *not* in the controls 
+    contrib2 <- samples[[j]] %>% filter(!(samples[[j]]$Name %in% control$Name))
+    samples_keep[[j]] <- rbind(contrib1, contrib2)
+  }
+  names(samples_keep) <- sample_names
+  samples_keep
+}
+
+
+##
+#
+#  join_common: Function which takes output of clean_common above,
+#    and merges based on common presence across all replicates of compounds. 
+#
+#  Inputs:
+#  * compounds: list of data.frames, 16 columns as in the spreadsheets
+#  
+#  Outputs:
+#  * common: merged, simplified data.frame, created via inner_join of data.frames after filtering.
+##
+join_common <- function(compounds) {
+  n_samp <- length(compounds)
+  subset_compounds <- vector("list", length = n_samp)
+  for(j in 1:n_samp) {
+    subset_compounds[[j]] <- compounds[[j]]
+    if(n_samp > 1) {
+      for(k in (1:n_samp)[-j]) {
+        subset_compounds[[j]] <- subset_compounds[[j]] %>%
+                                   subset(subset_compounds[[j]]$Name %in% compounds[[k]]$Name)
+      }
+    }
+    subset_compounds[[j]] <- subset_compounds[[j]] %>% select(Name, Area, PeakSN)
+  }
+  
+  # Join first two, if they exist
+  if(n_samp > 1) {
+    common <- inner_join(x = subset_compounds[[1]], y = subset_compounds[[2]], by = "Name")
+    if(n_samp >= 3) {
+      for(j in 3:n_samp) {
+        common <- inner_join(x = common, y = subset_compounds[[j]], by = "Name")  
+      }
+    }
+  } else {
+    common <- subset_compounds[[1]][, c("Name", "Area", "PeakSN")]
+  }
+  names(common) <- c("Name", paste0(c("Area_", "PeakSN_"), rep(1:n_samp, each = 2)))
+  common
+}
+```
+
+```{r}
+load("./dat/Normalized_RDA/M_DONOR_1n.rda")
+M_DONOR_1 <- join_common( clean_common(M_DONOR_1m,
+                         sample_names = c("MR_20H1_1", "MR_20H1_2","MR_20H1_3"),
+                         control_names = c("MR_20CH1"),
+                         ratio_par = 2.0) )
+```
+
+```{r}
+load("./dat/Normalized_RDA/M_DONOR_2n.rda")
+M_DONOR_2 <- join_common( clean_common(M_DONOR_2m,
+                         sample_names = c("MR_20H2_1", "MR_20H2_2","MR_20H2_3"),
+                         control_names = c("D2_MControl"),
+                         ratio_par = 2.0) )
+```
+
+```{r}
+load("./dat/Normalized_RDA/M_DONOR_3n.rda")
+M_DONOR_3 <- join_common( clean_common(M_DONOR_3m,
+                         sample_names = c("MR_20H3_1", "MR_20H3_2","MR_20H3_3"),
+                         control_names = c("MR_20CH3"),
+                         ratio_par = 2.0) )
+```
+
+```{r}
+load("./dat/Normalized_RDA/M_DONOR_4n.rda")
+M_DONOR_4 <- join_common( clean_common(M_DONOR_4m,
+                         sample_names = c("MR_20H4_1", "MR_20H4_2","MR_20H4_3"),
+                         control_names = c("MR_20CH4"),
+                         ratio_par = 2.0) )
+```
+
+```{r, warning = FALSE}
+load("./dat/Normalized_RDA/M_DONOR_6n.rda")
+M_DONOR_6 <- join_common( clean_common(M_DONOR_6m,
+                         sample_names = c("MR_21H6_1", "MR_21H6_2","MR_21H6_3"),
+                         control_names = c("MR_21CH6"),
+                         ratio_par = 2.0) )
+```
+
+```{r, warning = FALSE}
+load("./dat/Normalized_RDA/M_DONOR_7n.rda")
+M_DONOR_7 <- join_common( clean_common(M_DONOR_7m,
+                         sample_names = c("MR_21H7_1", "MR_21H72","MR_21H7_3"),
+                         control_names = c("MR_21CH7"),
+                         ratio_par = 2.0) )
+```
+
+```{r}
+load("./dat/Normalized_RDA/M_DONOR_8n.rda")
+M_DONOR_8 <- join_common( clean_common(M_DONOR_8m,
+                         sample_names = c("MR_21H8_1", "MR_21H8_2","MR_21H8_3"),
+                         control_names = c("MR_21CH8"),
+                         ratio_par = 2.0) )
+```
+
+```{r}
+load("./dat/Normalized_RDA/M_DONOR_9n.rda")
+M_DONOR_9 <- join_common( clean_common(M_DONOR_9m,
+                         sample_names = c("MR_21H9_1", "MR_21H9_2","MR_21H9_3"),
+                         control_names = c("MR_21CH9"),
+                         ratio_par = 2.0) )
+```
+
+## Organize The Content, Write Out
+
+```{r}
+all_SS <- vector("list", 9)
+
+for(j in c(1:4, 6:9)) {
+  all_SS[[j]] <- get(paste0("M_DONOR_", j))
+}
+names(all_SS) <- paste0("M_DONOR_", c(1:4, "NA", 6:9))
+                   
+save(file = "./Morgue_PCA.rda", all_SS)
+```
+
+## Cleanup, with Normalization Done First: REST
+
+The REST data, and the cleanup, cannot be done quite as easily, because there
+are multiple days being considered for each donor. RH1 is easy, because it was
+only recorded for one day; the others, not so much.
+
+```{r}
+load("./dat/Normalized_RDA/RH1n.rda")
+RH1 <- join_common( clean_common(RH1m,
+                                 sample_names = c("D0D11010", "D0D11042","D0D11055"),
+                                 control_names = c("RC"),
+                                 ratio_par = 2.0) )
+```
+
+```{r REST_donor_2}
+# Load the normalized donor data
+load("./dat/Normalized_RDA/RH2n.rda")
+# simple object name
+RH2 <- RH2m
+
+# Day 0 - extract, clean, join
+RH2_0 <- join_common( clean_common(RH2,
+                sample_names = c("D0D21257", "D0D21450","D0D21700"),
+                control_names = c("RC"),
+                ratio_par = 2.0) )
+# Day 1
+RH2_1 <- join_common( clean_common(RH2,
+                sample_names = c("D1D2945", "D1D21210","D1D21400", "D1D211600"),
+                control_names = c("D1D2RC"),
+                ratio_par = 2.0) )
+
+# Day 2
+RH2_2 <- join_common( clean_common(RH2,
+                sample_names = c("D2D21051", "D2D21248","D2D21450", "D2D21650"),
+                control_names = c("D2D2RC"),
+                ratio_par = 2.0) )
+
+# Day 3
+RH2_3 <- join_common( clean_common(RH2,
+                sample_names = c("D3D2930", "D3D21130","D3D21328", "D3D21529"),
+                control_names = c("D3D2RC"),
+                ratio_par = 2.0) )
+
+# Day 4
+RH2_4 <- join_common( clean_common(RH2,
+                sample_names = c("H2D4R1"),
+                control_names = c("D4601934"),
+                ratio_par = 2.0) )
+```
+
+Continue for the rest of the donors in the same way.
+
+```{r REST_Donor_3, warning = FALSE}
+load("./dat/Normalized_RDA/RH3n.rda")
+RH3 <- RH3m
+
+# Day 0
+RH3_0 <- join_common( clean_common(RH3,
+                sample_names = c("D0D3R1", "D0D3R2","D0D3R3"),
+                control_names = c("D0D3RC"),
+                ratio_par = 2.0) )
+
+# Day 1 Samples were not collected due to the rainfall during the sampling day
+RH3_1 <- NULL
+
+# Day 2
+RH3_2 <- join_common( clean_common(RH3,
+                sample_names = c("D2D3R1", "D2D3R2","D3D3R3"),
+                control_names = c("D2D3RC_2"),
+                ratio_par = 2.0) )
+
+# Day 3
+RH3_3 <- join_common( clean_common(RH3,
+                sample_names = c("D3D3R1", "D3D3R2","D3D3R3"),
+                control_names = c("D3D3RC"),
+                ratio_par = 2.0) )
+
+# Day 4
+RH3_4 <- join_common( clean_common(RH3,
+                sample_names = c("D4D3R1", "D4D3R2"),
+                control_names = c("D4D3RC"),
+                ratio_par = 2.0) )
+```
+
+And on and on we go ...
+
+```{r REST_Donor_4}
+load("./dat/Normalized_RDA/RH4n.rda")
+RH4 <- RH4m
+
+# Day 0
+RH4_0 <- join_common( clean_common(RH4,
+                sample_names = c("D0D4R1", "D0D4R2","D0D4R3"),
+                control_names = c("D4RC"),
+                ratio_par = 2.0) )
+
+# Day 1
+RH4_1 <- join_common( clean_common(RH4,
+                sample_names = c("D1D4R1", "D1D4R2","D1D4R3"),
+                control_names = c("D1D4RC"),
+                ratio_par = 2.0) )
+
+# Day 2 Sampling was not collected due to the rainfall during the sampling day
+RH4_2 <- NULL
+
+# Day 3
+RH4_3 <- join_common( clean_common(RH4,
+                sample_names = c("D3D4R1", "D3D4R2","D3D4R3"),
+                control_names = c("D3D4RC"),
+                ratio_par = 2.0) )
+
+# Day 4, only control collected
+RH4_4 <- NULL
+```
+
+```{r REST_Donor_6}
+load("./dat/Normalized_RDA/RH6n.rda")
+RH6 <- RH6m
+
+# Day 0
+RH6_0 <- join_common( clean_common(RH6,
+                sample_names = c("D6D0R1", "D6D0R2", "D6D0R3"),
+                control_names = c("D6RC"),
+                ratio_par = 2.0) )
+
+# Day 1
+RH6_1 <- join_common( clean_common(RH6,
+                sample_names = c("D6D111_15", "D6D113_10", "D6D114_10"),
+                control_names = c("D6D1RC"),
+                ratio_par = 2.0) )
+
+# Day 2
+RH6_2 <- join_common( clean_common(RH6,
+                sample_names = c("D6D211_40", "D6D213_44", "D6D215_30"),
+                control_names = c("D6D2RC"),
+                ratio_par = 2.0) )
+
+# Day 3
+RH6_3 <- join_common( clean_common(RH6,
+                sample_names = c("D6D311_41", "D6D313_42", "D6D315_14"),
+                control_names = c("D6D3RC"),
+                ratio_par = 2.0) )
+
+# Day 4
+RH6_4 <- join_common( clean_common(RH6,
+                sample_names = c("D6D411_15", "D6D413", "D6D415"),
+                control_names = c("D6D4RC"),
+                ratio_par = 2.0) )
+
+# Day 5
+RH6_5 <- join_common( clean_common(RH6,
+                sample_names = c("D6D511_15", "D6D513_45", "D6D515_20"),
+                control_names = c("D6D5RC"),
+                ratio_par = 2.0) )
+```
+
+```{r M_DONOR_7}
+load("./dat/Normalized_RDA/RH7n.rda")
+RH7 <- RH7m
+
+# Day 0
+RH7_0 <- join_common( clean_common(RH7,
+                sample_names = c("D0H713_25", "D0H715_30"),
+                control_names = c("D1RC"),
+                ratio_par = 2.0) )
+
+# Day 1
+RH7_1 <- join_common( clean_common(RH7,
+                sample_names = c("D1H710_58", "D1H713_21", "D1H715_21"),
+                control_names = c("D1RC"),
+                ratio_par = 2.0) )
+
+# Day 2
+RH7_2 <- join_common( clean_common(RH7,
+                sample_names = c("D2H710_45", "D2H713_33", "D2H715_15"),
+                control_names = c("D2RC"),
+                ratio_par = 2.0) )
+
+# Day 3 Sampling was not collected due to the rainfall during the sampling day
+RH7_3 <- NULL
+
+# Day 4
+RH7_4 <- join_common( clean_common(RH7,
+                sample_names = c("D4H711_30", "D4H713_40", "D4H715_10"),
+                control_names = c("D4RC"),
+                ratio_par = 2.0) )
+# Day 5
+RH7_5 <- join_common( clean_common(RH7,
+                sample_names = c("D5H79_45", "D5H712_45", "D5H714_45"),
+                control_names = c("D5RC"),
+                ratio_par = 2.0) )
+```
+
+```{r M_DONOR_8}
+load("./dat/Normalized_RDA/RH8n.rda")
+RH8 <- RH8m
+
+# Day 0
+RH8_0 <- join_common( clean_common(RH8,
+                sample_names = c("H8D0R1","H8D0R2"),
+                control_names = c("H8D0RC"),
+                ratio_par = 2.0) )
+
+# Day 1
+RH8_1 <- join_common( clean_common(RH8,
+                sample_names = c("H8D1R1","H8D1R2", "H8D1R3"),
+                control_names = c("H8D1RC"),
+                ratio_par = 2.0) )
+# Day 2
+RH8_2 <- join_common( clean_common(RH8,
+                sample_names = c("H8D2R1","H8D2R2", "H8D2R3"),
+                control_names = c("D2H8RC"),
+                ratio_par = 2.0) )
+# Day 3
+RH8_3 <- join_common( clean_common(RH8,
+                sample_names = c("H8D3R1","H8D3R2", "H8D3R3"),
+                control_names = c("H8D3RC"),
+                ratio_par = 2.0) )
+# Day 4  
+RH8_4 <- join_common( clean_common(RH8,
+#                sample_names = c("RD_RC_Tube_3_AM_sample", "H8D4R3"),  #### NOTE: nothing survives from RD_RC
+                sample_names = "H8D4R3",
+                control_names = c("H8D4RC"),
+                ratio_par = 2.0) )
+
+# Day 5
+RH8_5 <- join_common( clean_common(RH8,
+                sample_names = c("H8D5R1"),
+                control_names = c("H8D5RC"),
+                ratio_par = 2.0) )
+```
+
+```{r REST Donor 9}
+load("./dat/Normalized_RDA/RH9n.rda")
+RH9 <- RH9m
+
+# Day 0
+RH9_0 <- join_common( clean_common(RH9,
+                sample_names = c("D0H910_55", "D0H913_18", "D0H915_17"),
+                control_names = c("D0RC"),
+                ratio_par = 2.0) )
+
+# Day 1
+RH9_1 <- join_common( clean_common(RH9,
+                sample_names = c("D1H910_36", "D1H913_12", "D1H915_34"),
+                control_names = c("D1RC (2)"),
+                ratio_par = 2.0) )
+
+# Day 2
+RH9_2 <- join_common( clean_common(RH9,
+                sample_names = c("D2H910_53", "D2RC13_32", "D2RC15_11"),
+                control_names = c("D2RC"),
+                ratio_par = 2.0) )
+
+# Day 3
+RH9_3 <- join_common( clean_common(RH9,
+                sample_names = c("D3H911_1", "D3H913_25", "D3H915_21"),
+                control_names = c("D3RC"),
+                ratio_par = 2.0) )
+
+# Day 4
+RH9_4 <- join_common( clean_common(RH9,
+                sample_names = c("D4H910_50", "D4H913_18", "D4H915_35"),
+                control_names = c("D4RC"),  
+                ratio_par = 2.0) )
+
+# Day 5
+RH9_5 <- join_common( clean_common(RH9,
+                sample_names = c("D5H910:58"),
+                control_names = c("D5RC"),
+                ratio_par = 2.0) )
+```
+
+## Organize The Content, Write Out
+
+```{r}
+all_SS <- vector("list", 35)  # total number of donor+day
+
+# DONOR 1
+all_SS[[1]] <- RH1
+# DONOR 2
+all_SS[[2]] <- RH2_0
+all_SS[[3]] <- RH2_1
+all_SS[[4]] <- RH2_2
+all_SS[[5]] <- RH2_3 
+all_SS[[6]] <- RH2_4
+# DONOR 3
+all_SS[[7]]  <- RH3_0
+all_SS[[8]]  <- RH3_2
+all_SS[[9]]  <- RH3_3 
+all_SS[[10]] <- RH3_4
+# DONOR 4
+all_SS[[11]]  <- RH4_0
+all_SS[[12]]  <- RH4_1
+all_SS[[13]]  <- RH4_3 
+# DONOR 6
+all_SS[[14]]  <- RH6_0
+all_SS[[15]]  <- RH6_1
+all_SS[[16]]  <- RH6_2 
+all_SS[[17]]  <- RH6_3
+all_SS[[18]]  <- RH6_4
+all_SS[[19]]  <- RH6_5 
+# DONOR 7
+all_SS[[20]]  <- RH7_0
+all_SS[[21]]  <- RH7_1 
+all_SS[[22]]  <- RH7_2
+all_SS[[23]]  <- RH7_4
+all_SS[[24]]  <- RH7_5 
+# DONOR 8
+all_SS[[25]]  <- RH8_0
+all_SS[[26]]  <- RH8_1
+all_SS[[27]]  <- RH8_2
+all_SS[[28]]  <- RH8_3
+all_SS[[29]]  <- RH8_4
+all_SS[[30]]  <- RH8_5
+# DONOR 9
+all_SS[[31]]  <- RH9_0
+all_SS[[32]]  <- RH9_1
+all_SS[[33]]  <- RH9_2
+all_SS[[34]]  <- RH9_3
+all_SS[[35]]  <- RH9_4
+all_SS[[36]]  <- RH9_5
+
+names(all_SS) <- c("D1", 
+                   "D2_d0", "D2_d1", "D2_d2", "D2_d3", "D2_d4",
+                   "D3_d0", "D3_d2", "D3_d3", "D3_d4",
+                   "D4_d0", "D4_d1", "D4_d3",
+                   "D6_d0", "D6_d1", "D6_d2", "D6_d3", "D6_d4", "D6_d5",
+                   "D7_d0", "D7_d1", "D7_d2", "D7_d4", "D7_d5",
+                   "D8_d0", "D8_d1", "D8_d2", "D8_d3", "D8_d4", "D8_d5",
+                   "D9_d0", "D9_d1", "D9_d2", "D9_d3", "D9_d4", "D9_d5")
+
+save(file = "./REST_PCA.rda", all_SS)
+```
+

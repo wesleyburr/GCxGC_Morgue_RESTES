@@ -1,0 +1,96 @@
+---
+title: "Merge"
+author: "Wesley Burr"
+date: "06/09/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load the Sheets
+
+```{r}
+library("readxl")
+```
+
+```{r morgue, warning = FALSE, message = FALSE}
+sheets <- excel_sheets("./all_Morgue_cleaned.xlsx") 
+morgue <- lapply(sheets, FUN = function(x) {
+           read_xlsx(path = "./all_Morgue_cleaned.xlsx",
+                     sheet = x) })
+names(morgue) <- sheets
+```
+
+```{r rest, warning = FALSE, message = FALSE}
+sheets <- excel_sheets("./all_REST_cleaned.xlsx")  # note the diff location
+rest <- lapply(sheets, FUN = function(x) {
+           read_xlsx(path = "./all_REST_cleaned.xlsx",
+                     sheet = x) })
+names(rest) <- sheets
+```
+
+## Merge to Prepare for PCA
+
+The goal here is to extract all unique compounds from all objects, merge them,
+make a reference list, and then create a very large data.frame with rows
+being compounds, and columns being the various experimental samples, however
+many there are.
+
+```{r}
+morgue_compounds <- unique(unlist(lapply(morgue, FUN = function(x) { x$Name })))
+rest_compounds <- unique(unlist(lapply(rest, FUN = function(x) { x$Name })))
+```
+
+```{r}
+all_compounds <- unique(c(morgue_compounds,
+                          rest_compounds))
+```
+
+```{r}
+n_total <- length(morgue) + length(rest)
+```
+
+### Create the Data Frame
+
+```{r}
+all_data <- data.frame(matrix(data = 0.0, nrow = length(all_compounds),
+                              ncol = n_total + 1))
+all_data[, 1] <- all_compounds
+names(all_data) <- c("Name", names(morgue), names(rest))
+```
+
+```{r do_morgue}
+for(j in 1:length(morgue)) {
+  x <- morgue[[j]]
+  x_names <- x$Name
+  x_area <- apply(x, MAR = 1, FUN = function(y) { 
+    z <- y[seq(3, length(y), 2)]; 
+    z <- as.numeric(z);
+    mean(z) })
+  for(k in 1:length(x_area)) {
+    all_data[all_data$Name == x_names[k], j+1] <- x_area[k]
+  }
+}
+```
+
+```{r do_rest}
+for(j in 1:length(rest)) {
+  x <- rest[[j]]
+  x_names <- x$Name
+  x_area <- apply(x, MAR = 1, FUN = function(y) { 
+    z <- y[seq(3, length(y), 2)]; 
+    z <- as.numeric(z);
+    mean(z) })
+  for(k in 1:length(x_area)) {
+    all_data[all_data$Name == x_names[k], j+1+length(morgue)] <- x_area[k]
+  }
+}
+```
+
+```{r}
+write.csv(file = "pca_ready_all.csv", all_data, row.names = FALSE)
+```
+
+

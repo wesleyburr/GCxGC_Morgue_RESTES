@@ -1,0 +1,341 @@
+---
+title: "Filter Extraneous Compounds"
+author: "Wesley Burr"
+date: "`r Sys.Date()`"
+output: pdf_document 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## REST: Cleanup Noted Compounds Throughout
+
+There are a number of compounds that have to do with the
+column, the reference standard (somehow coming through), 
+and other definitely not-related things. We will strip
+them out now, in preparation for PCA.
+
+### Remove Explicitly
+
+The following compounds are definitely not related to decomp,
+and are related to the process or environment, and need to be
+removed:
+
+* Bromobenzene (or Benzene, bromo) 
+* Oxygen
+* Acetone
+* Methyl alcohol / Methanol
+* Carbon dioxide
+
+Before we start that, we'll make a list of the actual
+"appearances" of compounds, and then check against this
+to determine the actual filtering arguments (e.g., first 8 characters
+or full name, etc.).
+
+```{r}
+library(tidyverse)
+library(readxl)
+load("./REST_PCA2.rda")
+all_compounds <- sort(unique(
+  unlist(lapply(all_SS, FUN = function(x) { unlist(x$Name) }))))
+length(all_compounds)
+```
+
+So there are `r length(all_compounds)` (used to be 1438) 
+unique compounds present across the 35
+total samples, after Controlling (but with the 2.0 ratio
+argument in place). Let's look for each of the above compounds:
+
+```{r benz}
+#loc1 <- grep(pattern = "Benzene, bromo-", all_compounds, 
+#             ignore.case = TRUE)
+loc2 <- grep(pattern = "oxygen", all_compounds, ignore.case = TRUE)
+loc3 <- grep(pattern = "acetone", all_compounds, ignore.case = TRUE)
+loc4 <- grep(pattern = "methyl alc", all_compounds, ignore.case = TRUE)
+loc5 <- grep(pattern = "methanol, TMS", all_compounds, 
+             ignore.case = TRUE)
+loc6 <- grep(pattern = "carbon diox", all_compounds, ignore.case = TRUE)
+```
+
+Put them together as indexes, then extract these from the
+list of compounds as actual names.
+
+```{r}
+remove_specifics <- c(loc2, loc3, loc4, loc5, loc6)
+remove1 <- all_compounds[remove_specifics]
+```
+
+### Remove Via Keyword
+
+There are three keywords that show up that we should also
+strip out:
+
+* Sil
+* TMS
+* TBDMS
+
+Let's grab these now:
+
+```{r}
+loc1 <- grep(pattern = "Sil", all_compounds, ignore.case = TRUE)
+loc2 <- grep(pattern = "TMS", all_compounds)
+loc3 <- grep(pattern = "TBDMS", all_compounds)
+remove2 <- all_compounds[c(loc1, loc2, loc3)]
+```
+
+## Merge Compounds, no Stereochemistry Removal
+
+So we have remove1 - compounds to remove. We have remove2 - 
+more compounds to remove. And we have mappings, which have
+compounds that need to be renamed. Then, at the end, we need
+to check for duplicates, because the renaming may have 
+resulted in more than one compound surviving in a single sample
+due to the stereochemistry issue. 
+
+```{r}
+test <- lapply(all_SS, FUN = function(x) { 
+    y <- x %>% filter(!(Name %in% remove1 | Name %in% remove2))
+    which_rows <- which(y$Name %in% mappings$Original)
+    if(length(which_rows) > 0) {
+      for(j in 1:length(which_rows)) {
+        orig <- unlist(y[which_rows[j], "Name"])
+        y[which_rows[j], "Name"] <- mappings[mappings$Original == orig,
+                                             "Transformed"]
+      }
+    }
+    y
+  })
+```
+
+Now, look for duplicates, and remove if any now exist:
+
+```{r}
+test <- lapply(test, FUN = function(x) { 
+    dupes <- which(duplicated(x$Name))
+    if(length(dupes) > 0) {
+      x[-dupes, ]
+    } else {
+      x
+    }
+  })
+```
+
+We're done! Ready to send this off to PCA using other software.
+
+```{r}
+library("xlsx")
+write.xlsx(x = test[[1]],
+           file = "./all_REST_cleaned2.xlsx",
+           sheetName = names(test)[1],
+           col.names = TRUE,
+           row.names = TRUE,
+           append = FALSE)
+for(j in 2:length(test)) {
+  write.xlsx(x = test[[j]],
+             file = "./all_REST_cleaned2.xlsx",
+             sheetName = names(test)[j],
+             col.names = TRUE,
+             row.names = TRUE,
+             append = TRUE)
+}
+```
+
+## Extract Top Compounds
+
+```{r}
+compounds <- unlist(lapply(test, FUN = function(x) { x$Name }))
+summary_table <- table(compounds)
+summary_table <- sort(summary_table, decreasing = TRUE)
+top_compounds <- summary_table[1:(min(which(summary_table < 2))-1)]
+output_df <- data.frame(top_compounds)
+names(output_df) <- c("Compound", "Frequency (out of 36)")
+write.csv(file = "./REST_top_compounds2.csv", output_df,
+          row.names = FALSE)
+```
+
+We also want to know which samples they appeared in, which is
+less easy to do. We have the compound names at least, so now
+we need to create 36 variables to track things, and then fill it in.
+
+```{r}
+output_df2 <- as.data.frame(matrix(data = NA, nrow = nrow(output_df),
+                                   ncol = 36))
+names(output_df2) <- names(test)
+output_df2 <- cbind(output_df, output_df2)
+for(j in 1:nrow(output_df)) {
+    comp <- output_df[j, "Compound"]
+    fit <- unlist(lapply(test, FUN = function(x) { 
+      if(comp %in% x$Name) { 1 } else { 0 }}))
+    output_df2[j, -(1:2)] <- fit
+}
+write.csv(file = "./REST_top_compounds_withSpecifics2.csv", output_df2,
+          row.names = FALSE)
+```
+
+## Morgue: Cleanup Noted Compounds Throughout
+
+There are a number of compounds that have to do with the
+column, the reference standard (somehow coming through), 
+and other definitely not-related things. We will strip
+them out now, in preparation for PCA. This is identical
+to the process for the REST data, but done on a different
+source file (and different numbering).
+
+### Remove Explicitly
+
+The following compounds are definitely not related to decomp,
+and are related to the process or environment, and need to be
+removed:
+
+* Bromobenzene (or Benzene, bromo) 
+* Oxygen
+* Acetone
+* Methyl alcohol / Methanol
+* Carbon dioxide
+
+Before we start that, we'll make a list of the actual
+"appearances" of compounds, and then check against this
+to determine the actual filtering arguments (e.g., first 8 characters
+or full name, etc.).
+
+```{r}
+library(tidyverse)
+library(readxl)
+load("./Morgue_PCA2.rda")
+all_compounds <- sort(unique(
+  unlist(lapply(all_SS, FUN = function(x) { unlist(x$Name) }))))
+length(all_compounds)
+```
+
+So there are `r length(all_compounds)` 
+unique compounds present across the 9 
+total samples, after Controlling (but with the 2.0 ratio
+argument in place). Let's look for each of the above compounds:
+
+```{r benz2}
+#loc1 <- grep(pattern = "Benzene, bromo-", all_compounds, 
+#             ignore.case = TRUE)
+loc2 <- grep(pattern = "oxygen", all_compounds, ignore.case = TRUE)
+loc3 <- grep(pattern = "acetone", all_compounds, ignore.case = TRUE)
+loc4 <- grep(pattern = "methyl alc", all_compounds, ignore.case = TRUE)
+loc5 <- grep(pattern = "methanol, TMS", all_compounds, 
+             ignore.case = TRUE)
+loc6 <- grep(pattern = "carbon diox", all_compounds, ignore.case = TRUE)
+```
+
+Put them together as indexes, then extract these from the
+list of compounds as actual names.
+
+```{r}
+remove_specifics <- c(loc2, loc3, loc4, loc5, loc6)
+remove1 <- all_compounds[remove_specifics]
+```
+
+### Remove Via Keyword
+
+There are three keywords that show up that we should also
+strip out:
+
+* Sil
+* TMS
+* TBDMS
+
+Let's grab these now:
+
+```{r}
+loc1 <- grep(pattern = "Sil", all_compounds, ignore.case = TRUE)
+loc2 <- grep(pattern = "TMS", all_compounds)
+loc3 <- grep(pattern = "TBDMS", all_compounds)
+remove2 <- all_compounds[c(loc1, loc2, loc3)]
+```
+
+## Morgue Data, Ready to Rock & Roll
+
+So we have remove1 - compounds to remove. We have remove2 - 
+more compounds to remove. And we have mappings, which have
+compounds that need to be renamed. Then, at the end, we need
+to check for duplicates, because the renaming may have 
+resulted in more than one compound surviving in a single sample
+due to the stereochemistry issue. 
+
+```{r}
+test <- lapply(all_SS[-5], FUN = function(x) { 
+    y <- x %>% filter(!(Name %in% remove1 | Name %in% remove2))
+    which_rows <- which(y$Name %in% mappings$Original)
+    if(length(which_rows) > 0) {
+      for(j in 1:length(which_rows)) {
+        orig <- unlist(y[which_rows[j], "Name"])
+        y[which_rows[j], "Name"] <- mappings[mappings$Original == orig,
+                                             "Transformed"]
+      }
+    }
+    y
+  })
+```
+
+Now, look for duplicates, and remove if any now exist:
+
+```{r}
+test <- lapply(test, FUN = function(x) { 
+    dupes <- which(duplicated(x$Name))
+    if(length(dupes) > 0) {
+      x[-dupes, ]
+    } else {
+      x
+    }
+  })
+```
+
+We're done! Ready to send this off to PCA using other software.
+
+```{r}
+library("xlsx")
+write.xlsx(x = test[[1]],
+           file = "./all_Morgue_cleaned2.xlsx",
+           sheetName = names(test)[1],
+           col.names = TRUE,
+           row.names = TRUE,
+           append = FALSE)
+for(j in 2:length(test)) {
+  write.xlsx(x = test[[j]],
+             file = "./all_Morgue_cleaned2.xlsx",
+             sheetName = names(test)[j],
+             col.names = TRUE,
+             row.names = TRUE,
+             append = TRUE)
+}
+```
+
+## Extract Top Compounds
+
+```{r}
+compounds <- unlist(lapply(test, FUN = function(x) { x$Name }))
+summary_table <- table(compounds)
+summary_table <- sort(summary_table, decreasing = TRUE)
+top_compounds <- summary_table[1:(min(which(summary_table < 2))-1)]
+output_df <- data.frame(top_compounds)
+names(output_df) <- c("Compound", "Frequency (out of 8)")
+write.csv(file = "./Morgue_top_compounds2.csv", output_df,
+          row.names = FALSE)
+```
+
+We also want to know which samples they appeared in, which is
+less easy to do. We have the compound names at least, so now
+we need to create 8 variables to track things, and then fill it in.
+
+```{r}
+output_df2 <- as.data.frame(matrix(data = NA, nrow = nrow(output_df),
+                                   ncol = 8))
+names(output_df2) <- names(test)
+output_df2 <- cbind(output_df, output_df2)
+for(j in 1:nrow(output_df)) {
+    comp <- output_df[j, "Compound"]
+    fit <- unlist(lapply(test, FUN = function(x) { 
+      if(comp %in% x$Name) { 1 } else { 0 }}))
+    output_df2[j, -(1:2)] <- fit
+}
+write.csv(file = "./Morgue_top_compounds_withSpecifics2.csv", output_df2,
+          row.names = FALSE)
+```
+

@@ -1,0 +1,67 @@
+---
+title: "After Alignment Load & Review"
+author: "Wesley"
+date: "2022/11/20"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Normalize the Morgue Data Against Their Internal Standards
+
+```{r}
+if(!dir.exists("./dat/Normalized_RDA")) {
+  dir.create("./dat/Normalized_RDA")
+}
+
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat/M_DONOR_", k, ".rda"))
+  M_DONOR_ <- get(x = paste0("M_DONOR_", k))
+  bromo <- M_DONOR_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           filter(Area == max(Area))
+  split_M_DONOR_ <- M_DONOR_ %>% 
+                group_by(Sample) %>%
+                group_split()
+  for(j in 1:length(split_M_DONOR_)) {
+    split_M_DONOR_[[j]]$Area <- split_M_DONOR_[[j]]$Area / unlist(bromo[j, "Area"])
+  }
+  M_DONOR_ <- do.call("rbind", split_M_DONOR_)
+  assign(x = paste0("M_DONOR_", k, "m"), value = M_DONOR_)
+  save(file = paste0("./dat/Normalized_RDA/M_DONOR_", k, "n.rda"), 
+       list = paste0("M_DONOR_", k, "m"))
+}
+```
+
+
+## Normalize the REST Data Against Their Internal Standards
+
+```{r}
+if(!dir.exists("./dat/Normalized_RDA")) {
+  dir.create("./dat/Normalized_RDA")
+}
+
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat/RH", k, ".rda"))
+  RH_ <- get(x = paste0("RH", k))
+  bromo <- RH_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           filter(Area == max(Area))
+  split_RH_ <- RH_ %>% 
+                group_by(Sample) %>%
+                group_split()
+  for(j in 1:length(split_RH_)) {
+    split_RH_[[j]]$Area <- split_RH_[[j]]$Area / unlist(bromo[j, "Area"])
+  }
+  RH_ <- do.call("rbind", split_RH_)
+  assign(x = paste0("RH", k, "m"), value = RH_)
+  save(file = paste0("./dat/Normalized_RDA/RH", k, "n.rda"), 
+       list = paste0("RH", k, "m"))
+}
+```

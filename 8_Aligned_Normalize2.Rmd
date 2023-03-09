@@ -1,0 +1,109 @@
+---
+title: "After Alignment Load & Review + Filtered Bromo"
+author: "Wesley"
+date: "2022/11/20"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Adding the Filter for RT and Mass
+
+In this iteration, we use the filtering for RT and common mass that we derived
+in the 7_Identifying_Commons file. This is a rda.
+
+```{r}
+load("compound_ref_RT_mass.rda")
+```
+
+The format of this object is a data.frame, with the Name, common_mass,
+window_RT1 center and window_RT2 centers. This will let us filter down our
+data to only those compounds matching these requirements, so we can be sure
+that whatever we find at the end is well-matched across GCxGC samples and
+time. 
+
+```{r}
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat/M_DONOR_", k, ".rda"))
+  load(paste0("./dat/RH", k, ".rda"))
+}
+
+RT1_ww <- 5.0
+RT2_ww <- 0.1
+```
+
+## Normalize the Morgue Data Against Their Internal Standards
+
+```{r}
+if(!dir.exists("./dat/Normalized_RDA")) {
+  dir.create("./dat/Normalized_RDA")
+}
+
+ref_bromo <- data.frame(Name = "Benzene, bromo-", 
+                        common_mass = 77.50, 
+                        window_RT1 = 1114.93, 
+                        window_RT2 = 0.79)
+
+for(k in c(1:4, 6:9)) {
+  M_DONOR_ <- get(x = paste0("M_DONOR_", k))
+  bromo <- M_DONOR_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           filter(BaseMass >= 0.98 * ref_bromo$common_mass,  # 'correct' mass
+                  BaseMass <= 1.02 * ref_bromo$common_mass,
+                  RT1 <= ref_bromo$window_RT1 + RT1_ww,      # 'correct' RTs
+                  RT1 >= ref_bromo$window_RT1 - RT1_ww,
+                  RT2 <= ref_bromo$window_RT2 + RT2_ww,
+                  RT2 >= ref_bromo$window_RT2 - RT2_ww) %>%
+           filter(Area == max(Area)) %>%
+           slice_head(n = 1)
+  split_M_DONOR_ <- M_DONOR_ %>% 
+                group_by(Sample) %>%
+                group_split()
+  for(j in 1:length(split_M_DONOR_)) {
+    split_M_DONOR_[[j]]$Area <- split_M_DONOR_[[j]]$Area / unlist(bromo[j, "Area"])
+  }
+  M_DONOR_ <- do.call("rbind", split_M_DONOR_)
+  assign(x = paste0("M_DONOR_", k, "m"), value = M_DONOR_)
+  save(file = paste0("./dat/Normalized_RDA/M_DONOR_", k, "m8.rda"), 
+       list = paste0("M_DONOR_", k, "m"))
+}
+```
+
+
+## Normalize the REST Data Against Their Internal Standards
+
+```{r}
+if(!dir.exists("./dat/Normalized_RDA")) {
+  dir.create("./dat/Normalized_RDA")
+}
+
+for(k in c(1:4, 6:9)) {
+  RH_ <- get(x = paste0("RH", k))
+  bromo <- RH_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           filter(BaseMass >= 0.98 * ref_bromo$common_mass,  # 'correct' mass
+                  BaseMass <= 1.02 * ref_bromo$common_mass,
+                  RT1 <= ref_bromo$window_RT1 + RT1_ww,      # 'correct' RTs
+                  RT1 >= ref_bromo$window_RT1 - RT1_ww,
+                  RT2 <= ref_bromo$window_RT2 + RT2_ww,
+                  RT2 >= ref_bromo$window_RT2 - RT2_ww) %>%
+           filter(Area == max(Area)) %>%
+           slice_head(n = 1)
+  split_RH_ <- RH_ %>% 
+                group_by(Sample) %>%
+                group_split()
+  for(j in 1:length(split_RH_)) {
+    split_RH_[[j]]$Area <- split_RH_[[j]]$Area / unlist(bromo[j, "Area"])
+  }
+  RH_ <- do.call("rbind", split_RH_)
+  assign(x = paste0("RH", k, "m"), value = RH_)
+  save(file = paste0("./dat/Normalized_RDA/RH", k, "m8.rda"), 
+       list = paste0("RH", k, "m"))
+}
+```

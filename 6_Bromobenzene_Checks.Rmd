@@ -1,0 +1,250 @@
+---
+title: "Examine Benzene RTs"
+author: "Wesley Burr"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This file requires that the 1_Extract_Setup.Rmd and 1_UN_Extract_Setup.Rmd
+files have been run. This sets up the rda files in dat and dat_un so this
+can work. 
+
+## Extract the RTs for the Max SN Bromobenzene (Aligned)
+
+```{r}
+library("tidyverse")
+bromo_Morgue <- vector("list", length = 9)
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat/M_DONOR_", k, ".rda"))
+  M_DONOR_ <- get(x = paste0("M_DONOR_", k))
+  bromo <- M_DONOR_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           filter(QuantSN == max(QuantSN))
+  bromo_Morgue[[k]] <- bromo 
+}
+names(bromo_Morgue) <- paste0("DONOR_", 1:9)
+```
+
+
+```{r}
+bromo_REST <- vector("list", length = 9)
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat/RH", k, ".rda"))
+  RH_ <- get(x = paste0("RH", k))
+  bromo <- RH_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           filter(QuantSN == max(QuantSN))
+  bromo_REST[[k]] <- bromo
+}
+names(bromo_REST) <- paste0("RH_", 1:9)
+```
+
+## Cleanup, Make Excel
+
+```{r}
+s1 <- do.call("rbind", bromo_Morgue)
+s1 <- s1 %>% select(Sample, RT1, RT2)
+s2 <- do.call("rbind", bromo_REST)
+s2 <- s2 %>% select(Sample, RT1, RT2)
+bromo <- rbind(s1, s2)
+bromo <- t(bromo)
+bromo <- data.frame(bromo)
+names(bromo) <- bromo[1, ]
+bromo <- bromo[-1, ]
+bromo <- apply(bromo, MAR = 2, FUN = as.numeric)
+bromo <- as.data.frame(bromo)
+bromo
+```
+
+## Write Out File
+
+```{r}
+write.csv(file = "Checking_Bromobenze_IS.csv", bromo, row.names = FALSE)
+```
+
+
+```{r}
+plot(x = unlist(bromo[1, ]),
+     y = unlist(bromo[2, ]),
+     xlab = "RT1", 
+     ylab = "RT2")
+```
+
+## Extract the RTs for the Max SN Bromobenzene (Unaligned)
+
+```{r}
+bromo_Morgue <- vector("list", length = 9)
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat_un/M_DONOR_", k, ".rda"))
+  M_DONOR_ <- get(x = paste0("M_DONOR_", k))
+  bromo <- M_DONOR_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           filter(QuantSN == max(QuantSN))
+  bromo_Morgue[[k]] <- bromo 
+}
+names(bromo_Morgue) <- paste0("DONOR_", 1:9)
+```
+
+
+```{r}
+bromo_REST <- vector("list", length = 9)
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat_un/RH", k, ".rda"))
+  RH_ <- get(x = paste0("RH", k))
+  bromo <- RH_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           filter(QuantSN == max(QuantSN))
+  bromo_REST[[k]] <- bromo
+}
+names(bromo_REST) <- paste0("RH_", 1:9)
+```
+
+## Cleanup, Make Excel
+
+```{r}
+s1 <- do.call("rbind", bromo_Morgue)
+s1 <- s1 %>% select(Sample, RT1, RT2)
+s2 <- do.call("rbind", bromo_REST)
+s2 <- s2 %>% select(Sample, RT1, RT2)
+bromo <- rbind(s1, s2)
+bromo <- t(bromo)
+bromo <- data.frame(bromo)
+names(bromo) <- bromo[1, ]
+bromo <- bromo[-1, ]
+bromo <- apply(bromo, MAR = 2, FUN = as.numeric)
+bromo <- as.data.frame(bromo)
+bromo
+```
+
+## Write Out File
+
+```{r}
+write.csv(file = "Checking_Bromobenze_IS_un.csv", bromo, row.names = FALSE)
+```
+
+
+```{r}
+plot(x = unlist(bromo[1, ]),
+     y = unlist(bromo[2, ]),
+     xlab = "RT1", 
+     ylab = "RT2")
+```
+
+## Extract, Find Medians in Both Dimensions - from Aligned
+
+
+
+```{r}
+bromo_Morgue <- vector("list", length = 9)
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat/M_DONOR_", k, ".rda"))
+  M_DONOR_ <- get(x = paste0("M_DONOR_", k))
+  bromo <- M_DONOR_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           top_n(wt = PeakSN, n = 2) %>%
+           group_split()
+  bromo_Morgue[[k]] <- do.call("rbind", bromo)
+}
+names(bromo_Morgue) <- paste0("DONOR_", 1:9)
+
+bromo_REST <- vector("list", length = 9)
+for(k in c(1:4, 6:9)) {
+  load(paste0("./dat/RH", k, ".rda"))
+  RH_ <- get(x = paste0("RH", k))
+  bromo <- RH_ %>% 
+           group_by(Sample) %>% 
+           subset(Name == "Benzene, bromo-") %>%
+           top_n(wt = PeakSN, n = 2) %>%
+           group_split()
+  bromo_REST[[k]] <- do.call("rbind", bromo)
+}
+names(bromo_REST) <- paste0("RH_", 1:9)
+
+bromo <- rbind(do.call("rbind", bromo_Morgue) %>% select(RT1, RT2, BaseMass, PeakSN), 
+               do.call("rbind", bromo_REST) %>% select(RT1, RT2, BaseMass, PeakSN))
+```
+
+From this, we find that we have `r nrow(bromo)` recorded records of Bromobenzene
+in our data set. The median RTs are `r median(bromo$RT1)` and `r median(bromo$RT2)`.
+Plotted, they look like:
+
+```{r}
+cols <- rep("black", nrow(bromo))
+cols[bromo$BaseMass <= 77.10 & bromo$BaseMass >= 76.90] <- "red"
+plot(bromo$RT1, bromo$RT2, col = cols)
+```
+
+```{r}
+sliding_window <- function(dat, xww, yww) {
+
+  # dat has RT1, RT2 and BaseMass in it - find the most common mass
+  filt <- hist(dat$BaseMass, breaks = 1:(max(dat$BaseMass) + 1),
+               plot = FALSE)
+  common_mass <- filt$mids[filt$counts == max(filt$counts)]
+  dat <- dat %>% filter(BaseMass <= common_mass * 1.02, 
+                        BaseMass >= common_mass * 0.98)
+  
+  min_x <- min(dat$RT1)
+  max_x <- max(dat$RT1)
+  min_y <- min(dat$RT2)
+  max_y <- max(dat$RT2)
+  
+  # Form a set of bottom-left to top-right boundaries, coarse - half the 
+  # widths xww and yww as steps
+  x_seq <- seq(from = min_x - xww, to = max_x + xww, by = xww / 2)
+  y_seq <- seq(from = min_y - yww, to = max_y + yww, length.out = length(x_seq))
+  boundaries1 <- data.frame(x1 = rep(x_seq, each = length(y_seq)), 
+                            x2 = rep(x_seq + xww, each = length(y_seq)),
+                            y1 = rep(y_seq, length(x_seq)),
+                            y2 = rep(y_seq + yww, length(x_seq)))
+  first_pass <- apply(boundaries1, MAR = 1, FUN = function(z) {
+                        nrow(dat[dat$RT1 >= z[1] & dat$RT1 <= z[2] & 
+                             dat$RT2 >= z[3] & dat$RT2 <= z[4], ])
+                    })
+  
+  # identify the area of local maximum, then zoom in there and redo this
+  # with a much finer x-resolution (that's the limiting factor)
+  which_max <- which(first_pass == max(first_pass))[1]
+  x_seq <- seq(from = boundaries1[which_max, "x1"] - 2 * xww,
+               to = boundaries1[which_max, "x2"] + xww,
+               by = xww / 10)
+  y_seq <- seq(from = boundaries1[which_max, "y1"] - 2 * yww,
+               to = boundaries1[which_max, "y2"] + yww,
+               by = yww / 10)
+  boundaries2 <- data.frame(x1 = rep(x_seq, each = length(y_seq)), 
+                            x2 = rep(x_seq + xww, each = length(y_seq)),
+                            y1 = rep(y_seq, length(x_seq)),
+                            y2 = rep(y_seq + yww, length(x_seq)))
+  
+  second_pass <- apply(boundaries2, MAR = 1, FUN = function(z) {
+                         nrow(dat[dat$RT1 >= z[1] & dat$RT1 <= z[2] & 
+                              dat$RT2 >= z[3] & dat$RT2 <= z[4], ])
+                     })
+  x <- mean(unlist(boundaries2[which(second_pass == max(second_pass))[1], 1:2]))
+  y <- mean(unlist(boundaries2[which(second_pass == max(second_pass))[1], 3:4]))
+  return(c(common_mass, x, y))
+}
+```
+
+```{r testing}
+sliding_window(bromo, 10, 0.05)
+sliding_window(bromo, 10, 0.10)
+sliding_window(bromo, 15, 0.05)
+sliding_window(bromo, 15, 0.10)
+```
+
+This is the estimated 'centroid' for the common mass (+/-2%),
+and the centroid RT1 and RT2 estimates, which match your chosen RT1 and RT2
+variability.
+
+We can now apply this method to any compound we like, to find its "definitive"
+window, which can then be used for filtering! Time to write some more code ...
